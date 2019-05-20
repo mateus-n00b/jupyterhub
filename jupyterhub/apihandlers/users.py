@@ -21,6 +21,9 @@ from ..utils import maybe_future
 from ..utils import url_path_join
 from .base import APIHandler
 
+# Mateus
+import papermill as pm
+import os
 
 class SelfAPIHandler(APIHandler):
     """Return the authenticated user's model
@@ -37,6 +40,32 @@ class SelfAPIHandler(APIHandler):
             raise web.HTTPError(403)
         self.write(json.dumps(self.user_model(user)))
 
+class RunNotebook(APIHandler):
+        @admin_only
+        def get(self,notebook):
+            try:
+                home = os.getenv("HOME")
+                ipynb_input = "%s/%s" % (home,notebook)
+                ipynb_output = "%s/output_%s" % (home,notebook)
+
+                args = self.get_arguments("args")
+                params = dict()
+
+                for a in args:
+                    value = self.get_arguments(a)[0]
+                    params[a] = value
+
+                pm.execute_notebook(
+                            ipynb_input,
+                            ipynb_output,
+                            parameters = params
+                )
+
+                self.set_status(201)
+                self.write(json.dumps({"status":"succeeded"}))
+            except Exception as err:
+                self.write(json.dumps({"Error":err.strerror}))
+                # self.set_status(404)
 
 class UserListAPIHandler(APIHandler):
     @admin_only
@@ -124,6 +153,31 @@ def admin_or_self(method):
 class UserAPIHandler(APIHandler):
     @admin_or_self
     async def get(self, name):
+        # if len(self.get_arguments('notebook')):
+            # notebook = self.get_arguments('notebook')[0]
+            # try:
+            #     home = os.getenv("HOME")
+            #     ipynb_input = "%s/%s" % (home,notebook)
+            #     ipynb_output = "%s/output_%s" % (home,notebook)
+            #
+            #     args = self.get_arguments("args")
+            #     params = dict()
+            #
+            #     for a in args:
+            #         value = self.get_arguments(a)[0]
+            #         params[a] = value
+            #     pm.execute_notebook(
+            #                 ipynb_input,
+            #                 ipynb_output,
+            #                 parameters = params
+            #     )
+            #
+            #     self.set_status(201)
+            #     self.write(json.dumps({"status":"succeeded"}))
+            # except Exception as err:
+            #     # self.set_status(404)
+            #     self.write(json.dumps({"Error":err.strerror}))
+        # else:
         user = self.find_user(name)
         model = self.user_model(
             user, include_servers=True, include_state=self.current_user.admin
@@ -145,20 +199,19 @@ class UserAPIHandler(APIHandler):
             raise web.HTTPError(409, "User %s already exists" % name)
 
         user = self.user_from_username(name)
+
         if data:
             self._check_user_model(data)
             if 'admin' in data:
                 user.admin = data['admin']
                 self.db.commit()
-
-        try:
-            await maybe_future(self.authenticator.add_user(user))
-        except Exception:
-            self.log.error("Failed to create user: %s" % name, exc_info=True)
-            # remove from registry
-            self.users.delete(user)
-            raise web.HTTPError(400, "Failed to create user: %s" % name)
-
+            try:
+                await maybe_future(self.authenticator.add_user(user))
+            except Exception:
+                self.log.error("Failed to create user: %s" % name, exc_info=True)
+	    # remove from registry
+                self.users.delete(user)
+                raise web.HTTPError(400, "Failed to create user: %s" % name)
         self.write(json.dumps(self.user_model(user)))
         self.set_status(201)
 
@@ -751,6 +804,6 @@ default_handlers = [
     (r"/api/users/([^/]+)/tokens/([^/]*)", UserTokenAPIHandler),
     (r"/api/users/([^/]+)/servers/([^/]*)", UserServerAPIHandler),
     (r"/api/users/([^/]+)/servers/([^/]*)/progress", SpawnProgressAPIHandler),
-    (r"/api/users/([^/]+)/activity", ActivityAPIHandler),
     (r"/api/users/([^/]+)/admin-access", UserAdminAccessAPIHandler),
+    (r"/api/runnote/([^/]+)", RunNotebook),
 ]
